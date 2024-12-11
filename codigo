@@ -1,0 +1,210 @@
+; Modelo NetLogo - Grupo Trabalho - Inteligencia Artificial
+; Universidade Federal do Maranhão
+; Beatriz - Maria Eduarda - Marcelo - Luis
+
+breed [food-carriers food-carrier]  ;; Renomeado para evitar conflitos
+breed [predators predator]  ;; Predadores
+
+patches-own [
+  chemical            ;; quantidade de produto químico no patch
+  food                ;; quantidade de comida no patch (0, 1 ou 2)
+  nest?               ;; true para patches do ninho, false para outros
+  nest-scent          ;; número maior mais perto do ninho
+  food-source-number  ;; número de identificação das fontes de comida
+  obstacle?           ;; true se for um obstáculo
+]
+
+food-carriers-own [
+  food-carried        ;; quantidade de comida carregada pelo food-carrier
+  scent-sensitivity   ;; sensibilidade ao cheiro químico
+  communication-range ;; distância dentro da qual os food-carriers podem se comunicar
+]
+
+predators-own [
+  hunger              ;; nível de fome do predador (quanto maior, mais fome)
+  predation-success   ;; probabilidade de sucesso ao caçar
+]
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; ;
+;;; Funções de Setup                   ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; ;
+
+to setup
+  clear-all
+  set-default-shape food-carriers "bug"  ;; Forma dos food-carriers
+  set-default-shape predators "circle"   ;; Forma dos predadores
+
+  create-food-carriers population
+  [ set size 2
+    set color red   ;; cor = vermelho, não está carregando comida
+    set food-carried 0
+    set scent-sensitivity 1  ;; Sensibilidade padrão ao cheiro
+    set communication-range 5  ;; Distância de comunicação com outros food-carriers
+  ]
+
+  create-predators 10  ;; Criar 10 predadores
+  [ set size 3  ;; Aumenta o tamanho dos predadores para 3
+    set color yellow  ;; Cor dos predadores será amarela
+    set hunger 0  ;; Inicialmente não estão com fome
+    set predation-success 0.5 ;; Probabilidade inicial de sucesso na caça
+    setxy random-xcor random-ycor ;; Posicionar aleatoriamente os predadores no tabuleiro
+  ]
+
+  setup-patches
+  setup-obstacles  ;; Configurar obstáculos estáticos
+  reset-ticks
+end
+
+to setup-patches
+  ask patches
+  [ setup-nest
+    setup-food
+    recolor-patch ]
+end
+
+to setup-nest  ;; patch procedure
+  set nest? (distancexy 0 0) < 5
+  set nest-scent 200 - distancexy 0 0
+end
+
+to setup-food  ;; patch procedure
+  if (distancexy (0.6 * max-pxcor) 0) < 5
+  [ set food-source-number 1 ]
+  if (distancexy (-0.6 * max-pxcor) (-0.6 * max-pycor)) < 5
+  [ set food-source-number 2 ]
+  if (distancexy (-0.8 * max-pxcor) (0.8 * max-pycor)) < 5
+  [ set food-source-number 3 ]
+  if food-source-number > 0
+  [ set food one-of [1 2] ]
+end
+
+to setup-obstacles  ;; adicionar obstáculos estáticos
+  ask patches with [random-float 1 < 0.1] [
+    set obstacle? true
+  ]
+end
+
+to recolor-patch  ;; procedimento de recoloração do patch
+  ifelse nest?
+  [ set pcolor violet ]
+  [ ifelse obstacle?
+    [ set pcolor gray ]
+    [ ifelse food > 0
+      [ if food-source-number = 1 [ set pcolor cyan ]
+        if food-source-number = 2 [ set pcolor sky  ]
+        if food-source-number = 3 [ set pcolor blue ] ]
+      [ set pcolor scale-color green chemical 0.1 5 ] ]
+  ]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; ;
+;;; Função de Go (execução contínua)    ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; ;
+
+to go  ;; botão de execução
+  ask food-carriers [
+    ifelse color = red
+    [ look-for-food ]
+    [ return-to-nest ]
+    wiggle
+    fd 1
+  ]
+
+  ask predators [ hunt ]  ;; predadores caçam
+
+  diffuse chemical (diffusion-rate / 100)
+  ask patches [
+    set chemical chemical * (100 - evaporation-rate) / 100
+    recolor-patch
+  ]
+  tick
+end
+
+to hunt  ;; procedimento de caça do predador
+  let prey one-of food-carriers with [food-carried = 0]  ;; Encontrar um food-carrier sem comida
+  if prey != nobody and distance prey < 5  ;; Se a presa está próxima
+  [
+    face prey
+    move-to prey
+    set hunger hunger + 1  ;; Aumentar a fome do predador
+    ask prey [ die ]  ;; O predador mata o food-carrier (ele morre)
+  ]
+  
+  if hunger > 5  ;; Se o predador estiver muito faminto, morre
+  [ die ]
+
+  ;; Movimento aleatório caso o predador não encontre uma presa
+  rt random 60  ;; Gira o predador aleatoriamente
+  fd 1  ;; Move o predador para frente
+end
+
+to return-to-nest  ;; procedimento do food-carrier
+  ifelse nest?
+  [ set color red
+    set food-carried 0
+    rt 180 ]
+  [ set chemical chemical + 60
+    uphill-nest-scent ]
+
+  ;; Cooperação entre food-carriers: Informar outros sobre comida
+  ask food-carriers with [food-carried = 0]
+  [ ;; Aumenta a sensibilidade ao cheiro de outros food-carriers que encontraram comida
+    let nearby-food-carrier one-of food-carriers with [food-carried > 0]
+    if nearby-food-carrier != nobody and distance nearby-food-carrier < communication-range [
+      set scent-sensitivity scent-sensitivity + 0.2
+    ]
+  ]
+end
+
+to look-for-food  ;; procedimento do food-carrier
+  if food > 0 [
+    set color blue
+    set food-carried food-carried + 1
+    set food food - 1
+    rt 180
+    stop
+  ]
+  if (chemical >= 0.05) and (chemical < 2)
+  [ uphill-chemical ]
+end
+
+to uphill-chemical  ;; procedimento do food-carrier
+  let scent-ahead chemical-scent-at-angle 0
+  let scent-right chemical-scent-at-angle 45
+  let scent-left  chemical-scent-at-angle -45
+  if (scent-right > scent-ahead) or (scent-left > scent-ahead)
+  [ ifelse scent-right > scent-left
+    [ rt 45 ]
+    [ lt 45 ] ]
+end
+
+to uphill-nest-scent  ;; procedimento do food-carrier
+  let scent-ahead nest-scent-at-angle 0
+  let scent-right nest-scent-at-angle 45
+  let scent-left  nest-scent-at-angle -45
+  if (scent-right > scent-ahead) or (scent-left > scent-ahead)
+  [ ifelse scent-right > scent-left
+    [ rt 45 ]
+    [ lt 45 ] ]
+end
+
+to wiggle  ;; procedimento do food-carrier
+  rt random 40
+  lt random 40
+  if not can-move? 1 [ rt 180 ]
+end
+
+to-report nest-scent-at-angle [angle]  ;; função auxiliar
+  let p patch-right-and-ahead angle 1
+  if p = nobody [ report 0 ]
+  report [nest-scent] of p
+end
+
+to-report chemical-scent-at-angle [angle]  ;; função auxiliar
+  let p patch-right-and-ahead angle 1
+  if p = nobody [ report 0 ]
+  report [chemical] of p
+end
+
+; Copyright 1997 Uri Wilensky.
+; See Info tab for full copyright and license.
